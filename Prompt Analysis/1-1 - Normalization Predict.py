@@ -56,7 +56,7 @@ def normalize_text(text: str, already_precleaned: bool = False) -> str:
 
 def extract_and_group_data(filepath: str) -> pd.DataFrame:
     """Load Excel file, pre-clean text per row, group by analysis_ID, concatenate, and aggregate labels."""
-    df = pd.read_excel(filepath, sheet_name="original", engine="openpyxl")
+    df = pd.read_excel(filepath, sheet_name="prediction", engine="openpyxl")
     print("✅ Loaded Excel file.")
     print("📋 Column Names and Data Types:")
     print(df.dtypes)
@@ -64,8 +64,7 @@ def extract_and_group_data(filepath: str) -> pd.DataFrame:
     print(df.head())
 
     # Ensure required columns exist
-    required_cols = {"analysis_ID", "original",
-                     "func_bizstr", "edu_stem", "entre_training_experience"}
+    required_cols = {"analysis_ID", "original"}
     missing = required_cols - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
@@ -77,9 +76,9 @@ def extract_and_group_data(filepath: str) -> pd.DataFrame:
     grouped_df = df.groupby("analysis_ID", as_index=False).agg({
         "original": lambda texts: " ".join(texts),   # keep raw concatenated
         "preclean": lambda texts: " ".join(texts),   # concatenated pre-cleaned (used for normalization)
-        "func_bizstr": "max",
-        "edu_stem": "max",
-        "entre_training_experience": "max"
+        "comparison": "max",
+        "group": "max",
+        "Categorization-final": "max"
     })
 
     # Rename preclean to a clear name (not included in final output)
@@ -106,12 +105,12 @@ def normalize_and_save(df: pd.DataFrame, output_path: str):
 
     # Keep only requested columns in specified order
     out_cols = [
-        "analysis_ID",
+        "analysis_ID",        
+        "comparison",
+        "group",
+        "Categorization-final",
         "original",
-        "normalized",
-        "func_bizstr",
-        "edu_stem",
-        "entre_training_experience",
+        "normalized"
     ]
     df_out = df[out_cols].copy()
     df_out.to_excel(output_path, index=False, engine="openpyxl")

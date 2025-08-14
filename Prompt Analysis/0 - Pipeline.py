@@ -31,11 +31,11 @@ if __name__ == "__main__":
     vectorized_prediction_input_file = "feedback-merge-categorization - Normalized.xlsx"
     model_prediction_input_file = "feedback-merge-categorization - Normalized - Vectorized.csv"
 
-    run_script(normalization_script, "--input", test_input_file)
-    run_script(normalization_script_predict, "--input", prediction_input_file)
-    run_script(vectorization_script, "--input", vectorized_test_input_file)
-    run_script(vectorization_script, "--input", vectorized_prediction_input_file)
-    run_script(model_build_script, "--input", model_build_input_file)
+    # run_script(normalization_script, "--input", test_input_file)
+    # run_script(normalization_script_predict, "--input", prediction_input_file)
+    # run_script(vectorization_script, "--input", vectorized_test_input_file)
+    # run_script(vectorization_script, "--input", vectorized_prediction_input_file)
+    # run_script(model_build_script, "--input", model_build_input_file)
     run_script(prediction_script, "--input", model_prediction_input_file)
 
     print("🎯 Pipeline completed successfully.")

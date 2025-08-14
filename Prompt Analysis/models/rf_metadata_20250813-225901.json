@@ -1,0 +1,23 @@
+{
+  "best_params": {
+    "n_estimators": 200,
+    "max_depth": 6,
+    "min_samples_leaf": 3,
+    "max_features": "sqrt",
+    "min_samples_split": 2
+  },
+  "targets": [
+    "func_bizstr",
+    "edu_stem",
+    "entre_training_experience"
+  ],
+  "n_splits": 5,
+  "cv_metric_col": "F1_macro_mean@0.5",
+  "cv_f1_macro_mean_at_0.5": 0.5203962253527471,
+  "cv_f1_macro_mean_tuned": 0.47714774200173743,
+  "sklearn_version": "1.6.1",
+  "timestamp": "20250813-225901",
+  "vectorized_input": "RA_analysis - Normalized - Vectorized.csv",
+  "n_samples": 68,
+  "n_features": 384
+}

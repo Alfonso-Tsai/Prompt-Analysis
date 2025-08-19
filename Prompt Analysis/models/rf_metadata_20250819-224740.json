@@ -1,0 +1,40 @@
+{
+  "best_params": {
+    "n_estimators": 200,
+    "max_depth": 3,
+    "min_samples_leaf": 1,
+    "max_features": "sqrt",
+    "min_samples_split": 2
+  },
+  "thresholds": {
+    "func_bizstr": 0.35,
+    "edu_stem": 0.39999999999999997,
+    "entre_training_experience": 0.2
+  },
+  "targets": [
+    "func_bizstr",
+    "edu_stem",
+    "entre_training_experience"
+  ],
+  "n_splits": 5,
+  "cv_f1_macro_mean@0.5": 0.5533529903189346,
+  "cv_f1_macro_mean_tuned": 0.5293049661336107,
+  "test_f1_macro_mean": 0.4240061433043889,
+  "test_f1_per_target": {
+    "func_bizstr": 0.48148148148148145,
+    "edu_stem": 0.36363636363636365,
+    "entre_training_experience": 0.4269005847953216
+  },
+  "sklearn_version": "1.6.1",
+  "timestamp": "20250819-224740",
+  "vectorized_input": "RA_analysis - Normalized - Vectorized.csv",
+  "n_samples_trainval": 54,
+  "n_samples_test": 14,
+  "n_features": 384,
+  "cv_f1_macro_mean_standard@0.5": 0.4560294117647059,
+  "cv_f1_per_target_standard@0.5": {
+    "func_bizstr": 0.47058823529411764,
+    "edu_stem": 0.4375,
+    "entre_training_experience": 0.46
+  }
+}

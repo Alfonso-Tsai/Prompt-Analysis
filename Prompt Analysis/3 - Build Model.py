@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from pandas import ExcelWriter
 import sklearn as sk
 from joblib import dump
 from sklearn.ensemble import RandomForestClassifier
@@ -137,7 +138,13 @@ def main():
     X = df[emb_cols].to_numpy(dtype=np.float32)
     y = df[TARGETS].astype(int).to_numpy()
 
-    # ========= GRID SEARCH (CV=5, threshold fixed at 0.5) =========
+    # === Split into trainval and test sets ===
+    from sklearn.model_selection import train_test_split
+    X_trainval, X_test, y_trainval, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
+    )
+
+    # === GRID SEARCH on trainval ===
     grid_max_depth = expand_range(MAX_DEPTH_RANGE)
     grid_min_leaf = expand_range(MIN_SAMPLES_LEAF_RANGE)
 
@@ -152,7 +159,7 @@ def main():
             "max_features": max_feat,
             "min_samples_split": min_split,
         }
-        per_target_mean, overall = cv_macro_f1(X, y, params, n_splits=N_SPLITS)
+        per_target_mean, overall = cv_macro_f1(X_trainval, y_trainval, params, n_splits=N_SPLITS)
         row = dict(params)
         row["F1_macro_mean@0.5"] = overall
         for t in TARGETS:
@@ -163,16 +170,14 @@ def main():
         by=["F1_macro_mean@0.5", "n_estimators"], ascending=[False, False]
     ).reset_index(drop=True)
 
-    print("\n=== Grid Search (5-fold CV, threshold=0.5) — macro-F1 per target & overall ===")
+    print("\n=== Grid Search (CV on trainval, threshold=0.5) — macro-F1 per target & overall ===")
     cols = ["n_estimators", "max_depth", "min_samples_leaf", "max_features", "min_samples_split",
             "F1_macro_mean@0.5"] + [f"F1_{t}@0.5" for t in TARGETS]
     print(results[cols].to_string(index=False, float_format=lambda x: f"{x:.4f}"))
 
-    # --- Select best row ---
-    metric_col = "F1_macro_mean@0.5" if "F1_macro_mean@0.5" in results.columns else "F1_macro_mean"
-    best_idx = results[metric_col].astype(float).idxmax()
+    # --- Best params from CV ---
+    best_idx = results["F1_macro_mean@0.5"].astype(float).idxmax()
     best = results.loc[best_idx]
-
     best_params = {
         "n_estimators": int(best["n_estimators"]),
         "max_depth": int(best["max_depth"]),
@@ -181,33 +186,55 @@ def main():
         "min_samples_split": int(best["min_samples_split"]),
     }
 
-    # --- Threshold tuning with best hyperparams ---
-    probs_per_target, y_true_all = cv_collect_probs(X, y, best_params, n_splits=N_SPLITS)
+    # === Threshold tuning using stacked val probs ===
+    probs_per_target, y_true_all = cv_collect_probs(X_trainval, y_trainval, best_params, n_splits=N_SPLITS)
     best_thresh, best_f1, tuned_overall = pick_best_thresholds(probs_per_target, y_true_all)
 
     print("\nOptimal per-target thresholds:")
     for t in TARGETS:
         print(f"  {t}: threshold={best_thresh[t]:.2f}, macro-F1={best_f1[t]:.4f}")
-    print(f"Overall mean macro-F1 (with tuned thresholds): {tuned_overall:.4f}")
+    print(f"Overall mean macro-F1 (tuned thresholds): {tuned_overall:.4f}")
 
-    # --- Refit on ALL data and save ---
+    # === Also compute macro-F1 using standard 0.5 thresholds (for comparison) ===
+    standard_thresh = {t: 0.5 for t in TARGETS}
+    standard_f1 = {}
+    for i, t in enumerate(TARGETS):
+        y_t = y_true_all[:, i]
+        p = probs_per_target[i]
+        y_hat = (p >= 0.5).astype(int)
+        sc = f1_score(y_t, y_hat, average="macro", zero_division=0)
+        standard_f1[t] = float(sc)
+    standard_overall = float(np.mean(list(standard_f1.values())))
+
+    print("\n🔍 Comparison (Standard vs Tuned Thresholds)")
+    print("Standard 0.5 thresholds:")
+    for t in TARGETS:
+        print(f"  {t}: macro-F1={standard_f1[t]:.4f}")
+    print(f"Overall mean macro-F1 (standard @0.5): {standard_overall:.4f}")
+
+    # === Retrain final model on full trainval ===
+    base_final = RandomForestClassifier(**best_params, class_weight="balanced", bootstrap=True, n_jobs=-1, random_state=RANDOM_STATE)
+    final_clf = MultiOutputClassifier(base_final)
+    final_clf.fit(X_trainval, y_trainval)
+
+    # === Evaluate final model on test set ===
+    y_test_proba_list = final_clf.predict_proba(X_test)
+    y_test_preds = np.zeros_like(y_test)
+    for i, t in enumerate(TARGETS):
+        p1 = y_test_proba_list[i][:, 1] if y_test_proba_list[i].shape[1] > 1 else np.zeros(X_test.shape[0])
+        y_test_preds[:, i] = (p1 >= best_thresh[t]).astype(int)
+    f1s_test = {t: f1_score(y_test[:, i], y_test_preds[:, i], average="macro", zero_division=0) for i, t in enumerate(TARGETS)}
+    final_test_f1 = float(np.mean(list(f1s_test.values())))
+
+    print("\n=== Final Test Set Evaluation ===")
+    for t in TARGETS:
+        print(f"  {t}: macro-F1={f1s_test[t]:.4f}")
+    print(f"Overall test macro-F1: {final_test_f1:.4f}")
+
+    # === Save final model, thresholds, metadata ===
     outdir = Path(args.outdir)
     os.makedirs(outdir, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-
-    base_final = RandomForestClassifier(
-        n_estimators=best_params["n_estimators"],
-        max_depth=best_params["max_depth"],
-        min_samples_leaf=best_params["min_samples_leaf"],
-        max_features=best_params["max_features"],
-        min_samples_split=best_params["min_samples_split"],
-        class_weight="balanced",
-        bootstrap=True,
-        n_jobs=-1,
-        random_state=RANDOM_STATE,
-    )
-    final_clf = MultiOutputClassifier(base_final)
-    final_clf.fit(X, y)
 
     model_path = outdir / f"rf_multioutput_{stamp}.joblib"
     th_path    = outdir / f"rf_thresholds_{stamp}.json"
@@ -219,21 +246,64 @@ def main():
 
     metadata = {
         "best_params": best_params,
+        "thresholds": best_thresh,
         "targets": TARGETS,
         "n_splits": N_SPLITS,
-        "cv_metric_col": metric_col,
-        "cv_f1_macro_mean_at_0.5": float(best[metric_col]),
+        "cv_f1_macro_mean@0.5": float(best["F1_macro_mean@0.5"]),
         "cv_f1_macro_mean_tuned": float(tuned_overall),
+        "test_f1_macro_mean": final_test_f1,
+        "test_f1_per_target": f1s_test,
         "sklearn_version": sk.__version__,
         "timestamp": stamp,
         "vectorized_input": str(vec_csv),
-        "n_samples": int(X.shape[0]),
+        "n_samples_trainval": int(X_trainval.shape[0]),
+        "n_samples_test": int(X_test.shape[0]),
         "n_features": int(X.shape[1]),
+        "cv_f1_macro_mean_standard@0.5": standard_overall,
+        "cv_f1_per_target_standard@0.5": standard_f1,
     }
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(metadata, f, indent=2)
 
     print(f"\nSaved:\n  {model_path}\n  {th_path}\n  {meta_path}")
+
+    # === Save summary spreadsheet ===
+    summary_dir = outdir / "Model Summary"
+    summary_dir.mkdir(exist_ok=True)
+    xlsx_path = summary_dir / f"model_summary_{stamp}.xlsx"
+
+    # Prepare Grid Search results
+    grid_df = results[cols].copy()
+
+    # Prepare Threshold tuning summary
+    thresh_df = pd.DataFrame([
+        {"Target": t, "Optimized_Threshold": best_thresh[t], "macro-F1_Tuned": best_f1[t], "macro-F1_Standard@0.5": standard_f1[t]}
+        for t in TARGETS
+    ])
+    thresh_df.loc[len(thresh_df.index)] = {
+        "Target": "OVERALL",
+        "Optimized_Threshold": "",
+        "macro-F1_Tuned": tuned_overall,
+        "macro-F1_Standard@0.5": standard_overall,
+    }
+
+    # Prepare Test set performance
+    test_eval_df = pd.DataFrame([
+        {"Target": t, "Test_macro_F1": f1s_test[t]} for t in TARGETS
+    ])
+    test_eval_df.loc[len(test_eval_df.index)] = {
+        "Target": "OVERALL",
+        "Test_macro_F1": final_test_f1
+    }
+
+    # Write to Excel
+    with ExcelWriter(xlsx_path, engine="openpyxl") as writer:
+        grid_df.to_excel(writer, sheet_name="Grid_Search_Results", index=False)
+        thresh_df.to_excel(writer, sheet_name="Optimal_Thresholds", index=False)
+        test_eval_df.to_excel(writer, sheet_name="Test_Set_Evaluation", index=False)
+
+    print(f"📊 Saved model summary Excel to: {xlsx_path}")
+
 
 if __name__ == "__main__":
     main()
